@@ -1,0 +1,592 @@
+$restartfile ="ti_0_2.sif"
+$resultfile  ="ti_1_2.sif"
+$outputfile  ="ti_1_2.sif"
+$Lambda      = 10^8
+
+!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+!!
+!! elmer solver input file for inverse ASF simulation
+!!
+!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+
+check keywords warn
+!echo on
+
+Header
+   Mesh DB "." "B31kmmm"
+End
+
+$gravity = 9.7696e15
+$rhoi = 9.1501e-19 ! replaces: MATC "910.0*1.0E-06*(31556926.0)^(-2.0)" or 9.1376e-19
+
+Constants
+  ! needed for rheology
+  Gas Constant = Real 8.314 !Joule/mol x  K
+End
+
+!! water pressure at glacier front
+$ function waterpressure(Z) {\
+  rhow = 1012.0;\
+  waterline = 0.0;\
+  G = 9.81;\
+  _waterpressure = 0.0;\
+  if (Z>waterline) {\
+       _waterpressure = 0.0;\
+  }else {\
+       _waterpressure = 1.0 * rhow * G * (waterline - Z);\
+  }\
+}
+$ function capacity(T) { _capacity=146.3+(7.253*T)}
+
+!! in SI units, input in Kelvin
+$ function conductivity(T)  { _conductivity=9.828*exp(-5.7E-03*T)}
+
+!! pressuremeltingpoint (input in MPa)
+$ function pressuremeltingpoint(PIN) {\
+  P = PIN;\
+  if (P<0.0) P=0.0;\
+  beta=9.8E-08*1.0E06;\
+  _pressuremeltingpoint=273.15-(beta*P);\
+}
+
+!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+!! Simulation                        !! 
+!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+Simulation
+  Coordinate System  = Cartesian 3D 
+  Simulation Type = Steady State
+
+  Steady State Min Iterations = 1
+  Steady State Max Iterations =10
+
+  Output Intervals = 1
+
+  Output File = $resultfile".result"
+  Post File = $outputfile".ep"
+
+Restart Before Initial Conditions = Logical True
+
+  Restart File = $restartfile".result"
+  Restart Position = 0
+
+
+
+  Initialize Dirichlet Conditions = Logical False
+
+  max output level = 9
+  Extruded Mesh Levels = Integer 10 ! change to 10
+End
+
+!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+!!!! BODY                                                          !!
+!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+
+Body 1
+  Name = "glacier"
+  Equation = 1
+  Body Force = 1
+  Material = 1
+  Initial Condition = 1
+End
+Body 2
+  Name = "surf"
+  Equation = 1
+  Body Force = 1
+  Material = 1
+  Initial Condition = 1
+End
+Body 3
+  Name = "bed"
+  Equation = 1
+  Body Force = 1
+  Material = 1
+  Initial Condition = 1
+End
+!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+!! INIT                              !!
+!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+Initial Condition 1
+  Depth = Real 0.0 
+End
+
+!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+!! BODY FORCE                        !!
+!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+Body Force 1
+  Flow BodyForce 1 = Real 0.0                          
+  Flow BodyForce 2 = Real 0.0                          
+  Flow BodyForce 3 = Real   -$gravity
+  Temperature Volume Source = Equals W 
+End
+
+!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+!! MATERIAL                          !!
+!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+Material 1
+  Density = Real $rhoi
+
+!Flux Coefficient = Real 1.0
+  Critical Shear Rate = Real 1.0e-10
+
+  Sliding = equals beta
+
+  ! we want to have the Cauchy stress (for ComputeDevStress solver)
+  !----------------------------------
+  Cauchy = Logical True
+
+  !mesh update solver stuff
+  !------------------------
+  Mesh Elastic Modulus = 1.0
+  Mesh Poisson Ratio = 0.3
+
+
+  ! the heat capacity as a MATC function of temperature itself
+  !-----------------------------------------------------------
+  Temperature Heat Capacity = Variable Temperature
+      Real MATC "capacity(tx)*(31556926.0)^(2.0)"
+
+  ! the heat conductivity as a MATC function of temperature itself
+  !--------------------------------------------------------------
+  Temperature Heat Conductivity = Variable Temperature
+      Real MATC "conductivity(tx)*(31556926.0)*1.0E-06"
+
+  ! Upper limit - pressure melting point
+  !  as a MATC function of the pressure (what else?)
+  !-------------------------------------------------
+  Temperature Upper Limit = Variable Pressure
+         Real MATC "pressuremeltingpoint(tx)"
+
+! lower limit (to be save) as 0 K
+  !--------------------------------
+  Temperature Lower Limit = Real 0.0
+
+  ! Glen's flow law (using Glen)
+  !----------------
+  ! viscosity stuff
+  !----------------
+  Viscosity Model = String "Glen"
+  ! Viscosity has to be set to a dummy value
+  ! to avoid warning output from Elmer
+  Viscosity = Real 1.0 
+  Glen Exponent = Real 3.0
+  ! Rate factors (Paterson value in MPa^-3a^-1)
+  Rate Factor 1 = Real 1.258e13  
+  Rate Factor 2 = Real 6.046e28
+  ! these are in SI units - no problem, as long as
+  ! the gas constant also is 
+  Activation Energy 1 = Real 60e3
+  Activation Energy 2 = Real 139e3  
+  Glen Enhancement Factor = Real 1.0
+  ! the variable taken to evaluate the Arrhenius law
+  ! in general this should be the temperature relative
+  ! to pressure melting point. The suggestion below plugs
+  ! in the correct value obtained with TemperateIceSolver
+   Temperature Field Variable = String "Temperature Homologous"
+  ! the temperature to switch between the 
+  ! two regimes in the flow law
+  Limit Temperature = Real -10.0
+  !Constant Temperature = Real -7.0
+  
+End
+
+
+!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+!! SOLVER                            !!
+!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+
+Solver 1
+!!!!  INITIALISATION OF surf
+ !Exec Solver = Before simulation
+  Exec Solver = never
+  Equation = "Read surf"
+  Procedure = "ElmerIceSolvers" "Grid2DInterpolator"
+
+  Variable 1 = String "SurfaceElevation"
+  Variable 1 Invert = Logical True
+  Variable 1 data file = File "surfelevation.dat"
+  Variable 1 x0 = REal 654900.0
+  Variable 1 y0 = REal 8820900.0
+  Variable 1 lx = REal 91200.0
+  Variable 1 ly = REal 57200.0
+  Variable 1 Nx = Integer 913
+  Variable 1 Ny = Integer 573
+    
+End
+Solver 2
+!!! interpolate bedrock every time step
+  !Exec Solver = "Before Simulation"
+  Exec Solver = never
+  Equation = "Read bed"
+  Procedure = "DEMUpdate" "Grid2DInterpolator"
+
+  Variable 1 = String "BedElevation"
+  Variable 1 Invert = Logical True
+  Variable 1 data file = File "bedelevation.dat"
+  Variable 1 x0 = REal 654900.0
+  Variable 1 y0 = REal 8820900.0
+  Variable 1 lx = REal 91200.0
+  Variable 1 ly = REal 57200.0
+  Variable 1 Nx = Integer 913
+  Variable 1 Ny = Integer 573
+  
+End
+
+Solver 3
+!!! interpolate bedrock every time step
+  !Exec Solver = "Before Simulation"
+  Exec Solver = never
+  Equation = "Read beta"
+  Procedure = "BetaUpdate" "Grid2DInterpolator"
+  
+  Variable 1 = String "Beta"
+  Variable 1 Invert = Logical True
+  Variable 1 data file = File "beta2011.dat"
+  Variable 1 x0 = REal 654900.0
+  Variable 1 y0 = REal 8820900.0
+  Variable 1 lx = REal 91200.0
+  Variable 1 ly = REal 57200.0
+  Variable 1 Nx = Integer 913
+  Variable 1 Ny = Integer 573
+  
+End
+Solver 4
+  Exec Solver = "Before Simulation"
+! Exec Solver = never
+  Equation = "MapCoordinate"
+  Procedure = "StructuredMeshMapper" "StructuredMeshMapper"
+
+  Active Coordinate = Integer 3
+  !Displacement Mode = Logical True
+  !Mesh Velocity Variable = String "dSdt"
+  !Mesh Update Variable = String "dS"
+  !Mesh Velocity First Zero = Logical True
+
+  !Top Surface Variable Name = String "FS"
+  !Bottom Surface Variable Name = String "Zb"
+End
+Solver 5
+  Exec Solver = Never
+  Equation = "Pointwise Data"
+
+  Variable =  -nooutput "Dummy"
+  Variable DOFs = 2
+
+!  Procedure = "pointwise" "InterpolatePointValue"
+  Procedure = "ElmerIceSolvers" "InterpolatePointValue"
+
+  Nonlinear System Max Iterations = 1
+
+  Variable 1 = String "VsurfIni 1"
+  Variable Data 1 = String "v95s_p11s.x"
+  Variable 1 Supporting Points = Integer 3
+  Variable 1 Dimensions = Integer 2
+  Variable 1 Directions(2) = Integer 1 2
+  Exported Variable 1 = VsurfIni 1
+  Exported Variable 1 DOFS = Integer 1
+
+  Variable 2 = String "VsurfIni 2"
+  Variable Data 2 = String "v95s_p11s.y"
+  Variable 2 Supporting Points = Integer 3
+  Variable 2 Dimensions = Integer 2
+  Variable 2 Directions(2) = Integer 1 2
+  Exported Variable 2 = VsurfIni 2
+  Exported Variable 2 DOFS = Integer 1
+End
+
+Solver 6
+  Equation = "Flowdepth"
+  Exec Solver = "Before Simulation"
+  Procedure = File "ElmerIceSolvers" "FlowDepthSolver"
+  Variable = String "Depth"
+  Variable DOFs = 1
+  Linear System Solver = "Direct"
+
+  Linear System Direct Method = "MUMPS"
+
+!  Linear System Iterative Method = "BiCGStab"
+!  Linear System Max Iterations = 300
+!  Linear System Convergence Tolerance = 1.0E-09
+!  Linear System Abort Not Converged = False
+  Linear System Preconditioning = "ILU0"
+  Linear System Residual Output = 1
+
+  ! this sets the direction
+  ! -1 is negative z-direction (upside down)
+  ! +1 is positive (downside up)
+  Gradient = Real -1.0E00
+  ! switch that to True, if you want to have 
+  ! free surface gradients to be computed
+  !------------------------------------
+  Calc Free Surface = Logical False
+  ! the name for the exported (if not existing) added variable
+  ! the gradients will be stored in variables with the base
+  ! name given and "Grad1" and (in 3 dimensions) "Grad2" added,
+  ! so in our case "FreeSurfGrad1" and "FreeSurfGrad2"
+  ! again, if those variables did not exist, they will be
+  ! automatically created
+  !-----------------------------------------------------------
+  !Freesurf Name = String "FreeSurf"
+End
+Solver 7
+  Equation = "Flowheight"
+   Exec Solver = "Before Timestep"
+  Procedure = File "ElmerIceSolvers" "FlowDepthSolver"
+  Variable = String "Height"
+  Variable DOFs = 1
+!  Linear System Solver = "Iterative"
+  Linear System Solver = "Direct"
+  Linear System Direct Method = "Mumps"
+  Linear System Iterative Method = "BiCGStab"
+  Linear System Max Iterations = 300
+  Linear System Convergence Tolerance = 1.0E-09
+  Linear System Abort Not Converged = True
+  Linear System Preconditioning = "ILU1"
+  Linear System Residual Output = 1
+  Gradient = Real 1.0E00 
+  ! switch that to True, if you
+  ! want to have free surface gradients
+  ! to be computed
+  !------------------------------------
+  Calc Free Surface = Logical False
+
+End
+Solver 8
+   Exec Solver = "Before Simulation"
+   Equation = "Normal vector"
+   Variable = "Normal Vector"   
+   ! in 3dimensional simulations we have 3 entries
+   Variable DOFs = 3 
+   !NB: does not need to actually solve a matrix
+   !    hence no BW optimization needed
+   Optimize Bandwidth = Logical False 
+!   Procedure = "ComputeNormal" "ComputeNormalSolver"
+   Procedure = "ElmerIceSolvers" "ComputeNormalSolver"
+   ! if set to True, all boundary normals would be computed by default
+   ComputeAll = Logical False
+End
+
+Solver 9
+  Exec Solver = "Before Simulation"
+  Equation = String "StressSolver"
+
+!  Procedure =  File "ComputeDevStressNS" "ComputeDevStress"
+  Procedure =  File "ElmerIceSolvers" "ComputeDevStress"
+
+  Variable = -nooutput "Sij"
+  Variable DOFs = 1
+
+  Flow Solver Name = String "Flow Solution"
+
+  Stress Variable Name = String "Stress"
+  Exported Variable 1 = -nooutput "Stress" ! [Sxx, Syy, Szz, Sxy] in 2D
+                                 ! [Sxx, Syy, Szz, Sxy, Syz, Szx] in 3D
+  Exported Variable 1 DOFs = 6   ! 4 in 2D, 6 in 3D
+
+  Linear System Solver = Direct
+  Linear System Direct Method =  mumps
+!  Linear System Solver = "Iterative"
+!  Linear System Iterative Method = "BiCGStab"
+!  Linear System Max Iterations = 200
+!  Linear System Convergence Tolerance = 1.0E-06
+!  Linear System Abort Not Converged = True
+!  Linear System Preconditioning = "ILU0"
+!  Linear System Residual Output = 1
+End
+Solver 10
+  Exec Solver = "Before Simulation"
+  Equation = "Dummy"
+  Procedure = File "DummySolver" "DummySolver"
+  Variable = String "friction"
+  Variable DOFs = 1
+End
+
+!Compute the heat generated by ice deformation
+Solver 11
+  Equation = DeformationalHeat
+  Variable = W
+  Variable DOFs = 1
+  procedure =  "ElmerIceSolvers" "DeformationalHeatSolver"
+  Linear System Solver = direct
+  Linear System Direct Method = "Mumps"
+End
+
+Solver 12
+ !Exec Solver = "Never"
+  Equation = String "Homologous Temperature Equation"
+  Procedure =  File "ElmerIceSolvers" "TemperateIceSolver"
+  !Procedure =  File "/wrk/ygong/ASFforwardFiles/Solver/ElmerSolvers/TemperateIceRMG" "TemperateIceSolver"
+  ! Comment next line in parallel, as EliminateDirichlet does
+  ! not work in parallel
+  !------------------------------------------------------------
+!  Before Linsolve = "EliminateDirichlet" "EliminateDirichlet"
+  Variable = String "Temperature"
+  Variable DOFs = 1
+  Linear System Solver = "Direct"
+  Linear System Direct Method = "Mumps"
+  Linear System Convergence Tolerance = 1.0E-09
+  Linear System Abort Not Converged = False
+  Linear System Preconditioning = "ILU0"
+  Linear System Residual Output = 1
+  Steady State Convergence Tolerance = 1.0E-04
+  Nonlinear System Convergence Tolerance = 1.0E-06
+  Nonlinear System Max Iterations = 200
+  Nonlinear System Relaxation Factor = Real 9.999E-01
+  ! uses the contact algorithm (aka Dirichlet algorithm)
+  !-----------------------------------------------------
+  Apply Dirichlet = Logical True
+  Loop While Unconstrained Nodes = Logical True
+  Stabilize = True
+  ! those two variables are needed in order to store
+  ! the relative or homologous temperature as well
+  ! as the residual
+  !-------------------------------------------------
+  Exported Variable 1 = String "Temperature Homologous"
+  Exported Variable 1 DOFs = 1
+  Exported Variable 2 = String "Temperature Residual"
+  Exported Variable 2 DOFs = 1
+End
+
+Solver 13
+  Equation = "SaveMaterials"
+!  Exec Solver = "Never"
+  Exec Solver = After TimeStep
+  Procedure = File "SaveData" "SaveMaterials"
+  Parameter 1 =  String "Viscosity"
+  Parameter 2 =  String "Temperature Upper Limit"
+End
+Solver 14
+  Equation = "Navier-Stokes"
+  Exec Solver = String "Never"
+  Stabilization Method = Stabilized   ! Alternative: Stabilization Method = String Bubbles
+
+  flow model = Stokes
+
+  Calculate Loads = Logical true
+
+  Linear System Solver = Direct
+  Linear System Direct Method = mumps
+  !mumps percentage increase working space = integer 60
+
+  Nonlinear System Max Iterations = 500
+  Nonlinear System Convergence Tolerance  = 1.0e-5
+  Nonlinear System Newton After Iterations = 5
+  Nonlinear System Newton After Tolerance = 1.0e-7
+  Nonlinear System Relaxation Factor = 1.00
+
+  Nonlinear System Reset Newton = Logical True
+  Steady State Convergence Tolerance = Real 1.0e-6
+ 
+  Exported Variable 1 = -dofs 1 "Beta"
+  Exported Variable 2 = -dofs 1 "DJDBeta"
+  Exported Variable 3 = -dofs 1 "CostValue"
+  Exported Variable 4 = -dofs 2 "VsurfIni"
+  Exported Variable 5 = -dofs 4 "Velocityb"
+  Exported Variable 6 = -dofs 1 "BedElevation"
+  Exported Variable 7 = -dofs 1 "SurfaceElevation"
+  
+End
+
+Solver 15
+  Exec Solver = String "after timestep"	
+  exec interval = 1
+  Equation = String "ResultOutput"
+  Procedure = File "ResultOutputSolve" "ResultOutputSolver"
+  Output File Name = File "pv."$outputfile"."
+  Output Format = String "vtu"
+  Vtu Format = Logical True
+End
+
+
+!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+!! EQUATION                         !!
+!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+
+
+Equation 1
+!glacier&Basin3
+  Active Solvers(15) = 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15
+  NS Convect = Logical False
+End
+
+!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+!! the top and bottom boudray 	   !!
+!! need to be after side walls	   !!
+!! for Structuredmeshmapper	   !!
+!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+
+Boundary Condition 1
+  Name = "back"
+  Target Boundaries = 1
+  Velocity 1 = 0.0
+  Velocity 2 = 0.0
+  Velocity 3 = 0.0
+ 
+End
+!! Side wall:
+Boundary Condition 2
+  Name = "Sides" !the test case have back side
+  Target Boundaries  = 2
+  !Normal-Tangential Velocity = True
+  Velocity 1 = 0.0
+  Velocity 2 = 0.0
+  Velocity 3 = 0.0
+  
+End
+
+!! Front:
+Boundary Condition 3
+  Name = "Front"
+  Target Boundaries  = 3
+
+   !Flow Force BC = Logical True
+  External Pressure = Variable Coordinate 3
+        Real MATC "-1.0*waterpressure(tx)*1.0E-06"
+  !Velocity 1 = 0.0
+  !Velocity 2 = 0.0
+  !Adjoint 1 = Real 0.0
+  !Adjoint 2 = Real 0.0
+End
+
+
+! Bedrock
+Boundary Condition 4
+  Name = "bed"
+  Body Id = 3
+  Bottom Surface = Variable SurfaceElevation , BedElevation
+     REAL MATC "if ((tx(0)-tx(1)) > 10.0) {tx(1)} else {tx(0)-10.0}"
+  !Zb = Equals BedElevation
+
+  Flow Force BC = Logical True
+  
+  Height = Real 0.0
+
+! for temperature solver
+ ComputeNormal = Logical True
+ Temperature Flux BC = Logical True
+
+  friction = Variable Coordinate 1
+      Real Procedure "ElmerIceUSF" "getFrictionHeat"
+  ! friction = Variable Coordinate 1
+  !    Real Procedure "USF_GetFrictionHeating" "getFrictionHeat"
+
+  Temperature Heat Flux = Variable friction
+      Real MATC "0.040*(31556926.0)*1.0E-06 +tx"
+
+
+End
+
+! Upper Surface
+Boundary Condition 5
+  Name = "surface"
+  Body Id = 2
+ Top Surface =  Equals SurfaceElevation  !!for StructuredMeshMapper
+  Save Line = Logical True
+  Save Surf = Logical True
+  Depth = Real 0.0
+  Temperature = Variable Coordinate 3
+     Real MATC "-7.684 - 0.004.4*tx+273.15"
+  
+End
+
+
+
