@@ -1,0 +1,367 @@
+!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+!! Test GlaDS solvers              !!
+!!                                 !!
+!! Olivier Gagliardini June 2017   !!
+!!                                 !!
+!! SHMIP - test B5                 !!
+!!                                 !!
+!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+
+
+check keywords warn
+echo on
+
+$Bnum = "B5"
+$namerun = "glads_2d_20m3prs"
+
+! All Units are in m, year, MPa
+! For ice flow 
+$yearindays = 365.00 
+$yearinsec = yearindays*24*60*60 
+$MPainPa = 1.0e6 
+
+$Iter =  3.0!24.0*365.0	! 
+$dtIni = (1/24.0/yearindays)  	! hourly time steps for convergence
+$dtMin = 0.01/yearindays
+$OutPut = 1.0!24.0
+
+!a linearly down sloping bed with 2.0 degree sloping 
+$ function Hb(x) {\
+  alpha= 0.0*(pi/180.0);\ 
+  _Hb  = tan(alpha)*x ;\
+}
+
+! geometry according to Katja's thesis
+! added a minimum height
+
+$Hmin = 1.0
+$ function H(x) \
+  import Hmin {\
+  _H  = 4.0*(sqrt(x))+Hmin ;\
+}
+
+!! Definition of the sqrt geometry 
+!! for SHMIP A, B, C, D
+
+!$ function H(x) \
+!  import Hmin {\
+!  _H  = 6.0*(sqrt(x+5e3)-sqrt(5e3))+Hmin ;\
+!}
+
+$ev = 0.0 
+$Source =  2.0e-3*yearindays    ! 2 mm d-1 ->  m year-1, the basal melt source, should have the same unit of the sheet opening velocity
+
+! Elevation dependence and seasonal variations
+$a = 0.25*yearindays !amplitude, m day-1
+$MBasal = 1.0e-3 ! Basal melt term, m year-1
+$tau_r= -1.0e-2*yearindays ! m day-1 (100 m-1)
+$ function Source_season(t, x) \
+   import MBasal, a, Hmin, tau_r {\
+   pi= 3.1415;\
+   H  = 4.0*(sqrt(x))+Hmin ;\
+  _Source_season  = -a*cos(2*pi*t) + tau_r*H + MBasal;\ 
+}
+
+$ub = 3.17e-6*yearinsec        !3.17e-6(1.0e-6 m/s)
+
+!Prefactor from Cuffey and Paterson (2010) in MPa^{-3} a^{-1}
+! temperate Ice (power law for SSA)
+$rhoi = 910.0/(MPainPa*yearinsec^2) 
+$rhow = 1000.0/(MPainPa*yearinsec^2) 
+$A1 = 2.89165e-13*yearinsec*MPainPa^3    ! No used ?
+$A2 = 2.42736e-02*yearinsec*MPainPa^3	 ! No used ?
+
+$ng = 3.0
+$Aglen = 2.5e-25*yearinsec*MPainPa^3	!Creep closure constant / Sheet Closure Coefficient 
+$eta = (2.0*Aglen)^(-1.0/ng)
+
+$gravity = 9.80*yearinsec^2  
+
+! For the sheet
+$Ar = Aglen
+$alphas = 1.25	!Water flow exponent alpha sheet
+$betas = 1.5 	!Water flow exponent beta sheet
+$lr = 2.0 	!bed undulation wave length (=l_r in write-up) (or the cavity spacing)
+$hr = 0.05 	!Bedrock Bump Height
+$Ks = 0.0005*yearinsec*(1.0/MPainPa)^(1.0-betas)	!0.0005Conductivity sheet: test case number 0.005*...0.002->2degree
+$Hs = 0.05 ! IC for h		!Sheet Thickness/ can't find in the thesis/ could also be a function See examples 
+
+! For the Channels
+$alphac = 1.25	!Water flow exponent alpha channel
+$betac = 1.5 	!Water flow exponent beta channel
+$Kc = 0.1*yearinsec*(1.0/MPainPa)^(1.0-betac)		!Conductivity channel originally 0.1
+$Ac = Aglen  
+$lc = 2.0    !Sheet width below/over channel
+$Ct = -7.5e-8*MPainPa	  	     !Pressure melt coefficient 
+$Cw = 4220.0*yearinsec^2  	     !Heat capacity of water
+$Lw = 334000.0*yearinsec^2	     !Latent heat of fusion
+
+! For the Moulins
+$Am = 2.0e5	! moulin area huge = a lake
+$Linput = 20.0*yearinsec	! flux from the moulin/lake: 0-110 m3 s-1 -> m3 year-1 constant
+
+! Elevation dependence and seasonal variations
+$Lfactor = 3.0e7 ! to have the same seasonality as the metl term but to produce the same outcome as the constant 20 m3 s-1 results
+$ function Linput_season(t, x) \
+   import MBasal,  dtIni, a, Hmin, tau_r, Lfactor {\
+   pi= 3.1415;\
+   H  = 4.0*(sqrt(x))+Hmin ;\
+  _Linput_season  = Lfactor*(-a*cos(2*pi*t*dtIni) + tau_r*H + MBasal);\ 
+}
+
+
+Header
+  Mesh DB "." "toy_sidemouline_GLADS_res100"
+End
+
+!---------------------------------------------------
+!---------------- CONSTANTS ------------------------
+!---------------------------------------------------
+
+Constants
+  Latent Heat = Real $Lw
+  Gravity Norm = Real $gravity
+  Water Density = Real $rhow
+  Ice Density = Real $rhoi
+  Sheet Thickness Variable Name = String "Sheet Thickness"
+  Hydraulic Potential Variable Name = String "Hydraulic Potential"
+  Channel Area Variable Name = String "Channel Area"
+  Bedrock Variable Name = String "Zb"
+End
+
+!---------------------------------------------------
+!---------------- SIMULATION -----------------------
+!---------------------------------------------------
+
+Simulation
+  Coordinate System  = Cartesian 2D 
+  Simulation Type = transient
+
+  Timestepping Method = "bdf"
+  BDF Order = 1
+
+  Timestep Intervals(1) = $Iter
+  Output Intervals(1) = $OutPut
+  Timestep Sizes(1) = $dtIni 
+
+  Steady State Max Iterations = 1 
+  Steady State Min Iterations = 1
+
+  Output File = "$namerun".result"
+  Post File = "glads_toy_2d_resl100_mflux20m3prs.vtu"
+
+  max output level = 3
+End
+
+!---------------------------------------------------
+!---------------- BODIES ---------------------------
+!---------------------------------------------------
+
+! This body is located at the ice/bed interface and will be used to solve 
+! the sheet equation
+Body 1
+  Name= "sheet"
+  Equation = 1
+  Material = 1
+  Body Force = 1
+  Initial Condition = 1
+End
+
+
+!---------------------------------------------------
+!---------------- INITIAL CONDITIONS ---------------
+!---------------------------------------------------
+
+!! for the sheet 
+Initial Condition 1
+  Sheet Thickness = Real $Hs
+  Zs = Variable Coordinate 1
+    Real MATC "H(tx)"
+  Zb = Variable Coordinate 1
+    Real MATC "Hb(tx)"
+    !Real 0.0 
+  Effective Pressure = Variable Coordinate 1
+     Real MATC "rhoi*gravity*H(tx)"
+End
+
+!---------------------------------------------------
+!---------------- BODY FORCES ----------------------
+!---------------------------------------------------
+
+! source 1 cm/day
+Body Force 1
+  Hydraulic Potential Volume Source = Real $Source 
+! Hydraulic Potential Volume Source =  Variable Time, Coordinate 1
+! 	    Real MATC "Source_season(tx(0), tx(1))"
+End
+
+!---------------------------------------------------
+!---------------- MATERIALS ------------------------
+!---------------------------------------------------
+
+!! ice material properties in MPa - m - a system 
+Material 1
+  Density = Real $rhoi          
+  Glen Exponent = Real $ng
+
+! For the sheet 
+  Sheet Conductivity = Real $Ks 
+  Sheet flow exponent alpha = Real $alphas
+  Sheet flow exponent beta = Real $betas
+  Englacial Void Ratio = Real $ev       
+
+  Sliding Velocity = Real $ub
+
+  Bedrock Bump Length = Real $lr
+  Bedrock Bump High = Real $hr
+  Sheet Closure Coefficient = Real $Ar 
+! For the Channels
+  Channel Conductivity = Real $Kc 
+  Channel flow exponent alpha = Real $alphac
+  Channel flow exponent beta = Real $betac
+  Channel Closure Coefficient = Real $Ac
+  Sheet Width Over Channel = Real $lc
+  Pressure Melting Coefficient = Real $Ct
+  Water Heat Capacity = Real $Cw
+
+! For both
+  Ice Normal Stress = Variable Coordinate 1
+     Real MATC "rhoi*gravity*H(tx)"
+End
+
+!---------------------------------------------------
+!---------------- SOLVERS --------------------------
+!---------------------------------------------------
+!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+
+Solver 1 
+  Equation = "GlaDS Coupled sheet"
+  Procedure = "ElmerIceSolvers" "GlaDSCoupledSolver"
+  Variable = -dofs 1 "Hydraulic Potential"
+
+  Activate Channels = Logical True
+  Activate Melt from Channels = Logical True
+  Neglect Sheet Thickness in Potential = Logical True
+
+  ! choices are EXPLICIT, CRANK-NICOLSON, IMPLICIT
+  Channels Integration method = String "Crank-Nicolson"
+  Sheet Integration method = String "Crank-Nicolson"
+
+  Exported Variable 1 = -dofs 1 "Vclose"
+  Exported Variable 2 = -dofs 1 "Wopen"
+  Exported Variable 3 = -dofs 1 "Normal Stress"
+  Exported Variable 4 = -dofs 1 "Water Pressure"
+  Exported Variable 5 = -dofs 1 "Effective Pressure"
+  Exported Variable 6 = -dofs 2 "Sheet Discharge"
+  Exported Variable 7 = -dofs 1 "Sheet Storage"
+  Exported Variable 8 = -dofs 1 "Zs"
+  Exported Variable 9 = -dofs 1 "Zb"
+  Exported Variable 10 = -dofs 1 "Flux from Moulins"
+
+  Linear System Solver = Direct     
+  !Replace UMFPACK with MUMPS IF you are using
+  !multiple partitions 
+  Linear System Direct Method = MUMPS
+
+  Nonlinear System Max Iterations = 100
+  Nonlinear System Convergence Tolerance  = 1.0e-6
+  Nonlinear System Relaxation Factor = 1.00
+
+  Coupled Max Iterations = Integer 100
+  Coupled Convergence Tolerance = Real 1.0e-3
+
+  Steady State Convergence Tolerance = 1.0e-03
+End
+
+Solver 2 
+  ! Just here to declare the variable Sheet Thickness
+  Equation = "GlaDS Thickness sheet"
+  Procedure = "ElmerIceSolvers" "GlaDSsheetThickDummy"
+  Variable = -dofs 1 "Sheet Thickness"
+End
+
+Solver 3 
+  ! Just here for output and declare the Channel Area variable
+  ! It is executed simultaneously to saving
+  Exec Solver = After Saving
+  Equation = "GlaDS Channel OutPut"
+  Procedure = "ElmerIceSolvers" "GlaDSchannelOut"
+  Variable = -dofs 1 "Channel Area"
+  ! Define that the variable is define on the edges only
+  Element = "n:0 e:1"
+  
+  Exported Variable 1 = -dofs 1 "Channel Flux"
+
+  VTU OutPutFile = Logical True
+  VTU BinaryFile = Logical False
+
+  Channels OutPut Directory Name = String "results"
+  Channels OutPut File Name = String $namerun$"_channels"
+End
+Solver 4
+    Exec Solver = After simulation
+    Equation = "GmshOutput"
+    Procedure = "ResultOutputSolve" "ResultOutputSolver"
+    Output Directory = "results"
+    Output File Name = $namerun$"_waterpressure.msh"
+    Gmsh Format = Logical True
+    Parallel Reduce = Logical True
+    Scalar Field 1 = "Water Pressure"
+End
+Solver 5
+    Exec Solver = Never
+!     Exec Solver = After all
+    Equation = "SaveScalars" 
+    Procedure = "SaveData" "SaveScalars"
+    Filename = $namerun$"_waterpressure.dat"
+    Filename Numbering = Logical True
+    Parallel Reduce = Logical True
+    Variable 1 =  "Water Pressure"
+
+End 
+
+!---------------------------------------------------
+!---------------- EQUATIONS ------------------------
+!---------------------------------------------------
+! Equation for the ice
+Equation 1
+  Active Solvers (4) = 1 2 3 4
+End
+
+
+!---------------------------------------------------
+!---------------- BOUNDARY CONDITIONS --------------
+!---------------------------------------------------
+
+! the two sides
+Boundary Condition 1
+  Name = "Sides"
+  Target Boundaries(2) = 1 3
+  No Channel BC = Logical True
+End
+
+!
+Boundary Condition 2
+  Name = "dam"
+  Target Boundaries(1) = 2
+  No Channel BC = Logical True
+End
+
+Boundary Condition 3
+  Name = "front"
+  Target Boundaries(1) = 4
+  Hydraulic Potential = Real 0.0
+  No Channel BC = Logical True
+End
+
+! This is the boundary condition for the moulins, case B5
+Boundary Condition 4
+  Name = "moulins"
+  Target Boundaries(1) = 5       ! the number of the extra boundary in the mesh file. normally if you have 4 boundraies this one is 5. It depends on how many normal boundries you have	
+  Moulin Storage = Logical True
+  Moulin Area = Real $Am
+  Moulin Flux = Real $Linput  
+! Moulin Flux = Variable Time, Coordinate 1
+! 	    Real MATC "Linput_season(tx(0), tx(1))"
+End
+
